@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { runDropper } from "../agents/dropper/agent.js";
 import { observationPoolMetrics } from "../agents/dropper/pool.js";
 import { ObserverStreamError, runObserver } from "../agents/observer/agent.js";
-import { runReflector } from "../agents/reflector/agent.js";
+import { runReflector, type ReflectorAddon } from "../agents/reflector/agent.js";
 import { debugLog, withDebugLogContext } from "../debug-log.js";
 import { resolveObserverChunkMaxTokens, resolveWorkerMemoryMaxTokens } from "../config.js";
 import type { ConsolidationPhase, ResolveCtx, ResolveResult, Runtime } from "../runtime.js";
@@ -285,7 +285,14 @@ async function runStageWithFallback<T>(
 	}
 }
 
+export type ReflectorPass = {
+	addon: ReflectorAddon;
+	/** Implementations must gate release on clean completion and their captured origin. */
+	flush(): Promise<void>;
+};
+
 export type ConsolidationTriggerHooks = {
+	prepareReflector?: (ctx: ConsolidationCtx, signal: AbortSignal | undefined) => ReflectorPass | undefined | Promise<ReflectorPass | undefined>;
 	/**
 	 * Called after an idle-mode consolidation run finishes (or is skipped) with
 	 * the `agent_settled` extension context that launched it, so work that shares
@@ -302,7 +309,7 @@ export function registerConsolidationTrigger(pi: ExtensionAPI, runtime: Runtime,
 
 	pi.on("agent_start", (_event: unknown, ctx: ConsolidationCtx) => {
 		if (!idleMode(ctx)) {
-			maybeLaunchConsolidation(pi, runtime, ctx);
+			maybeLaunchConsolidation(pi, runtime, ctx, hooks);
 			return;
 		}
 		// The session model is about to be called: get memory workers off the
@@ -318,11 +325,11 @@ export function registerConsolidationTrigger(pi: ExtensionAPI, runtime: Runtime,
 	});
 	pi.on("turn_end", (_event: unknown, ctx: ConsolidationCtx) => {
 		if (idleMode(ctx)) return;
-		maybeLaunchConsolidation(pi, runtime, ctx);
+		maybeLaunchConsolidation(pi, runtime, ctx, hooks);
 	});
 	pi.on("agent_settled", (_event: unknown, ctx: ConsolidationCtx) => {
 		if (!idleMode(ctx)) return;
-		const launched = maybeLaunchConsolidation(pi, runtime, ctx);
+		const launched = maybeLaunchConsolidation(pi, runtime, ctx, hooks);
 		if (!hooks.afterIdleConsolidation) return;
 		if (!launched) {
 			hooks.afterIdleConsolidation(ctx);
@@ -344,7 +351,7 @@ function debugSessionMetadata(ctx: ConsolidationCtx): { sessionId?: string; sess
 }
 
 /** Launch a consolidation run when any stage is due. Returns its promise, or undefined when nothing launched. */
-function maybeLaunchConsolidation(pi: ExtensionAPI, runtime: Runtime, ctx: ConsolidationCtx): Promise<void> | undefined {
+function maybeLaunchConsolidation(pi: ExtensionAPI, runtime: Runtime, ctx: ConsolidationCtx, hooks: ConsolidationTriggerHooks): Promise<void> | undefined {
 	runtime.ensureConfig(ctx.cwd);
 	if (runtime.config.passive === true) return undefined;
 	if (runtime.consolidationInFlight) return undefined;
@@ -370,7 +377,7 @@ function maybeLaunchConsolidation(pi: ExtensionAPI, runtime: Runtime, ctx: Conso
 		...sessionMetadata,
 		runId,
 	}, async () => {
-		await runConsolidationPipeline(pi, runtime, consolidationCtx);
+		await runConsolidationPipeline(pi, runtime, consolidationCtx, hooks);
 	}));
 }
 
@@ -386,6 +393,7 @@ export async function runConsolidationPipeline(
 	pi: ExtensionAPI,
 	runtime: Runtime,
 	ctx: ConsolidationCtx,
+	hooks: ConsolidationTriggerHooks = {},
 ): Promise<void> {
 	const resolver = makeModelResolver(runtime, ctx);
 
@@ -403,7 +411,7 @@ export async function runConsolidationPipeline(
 	runtime.consolidationPhase = "reflector";
 	let reflectorResult: ReflectorStageResult;
 	try {
-		reflectorResult = await runReflectorStage(pi, runtime, ctx, resolver);
+		reflectorResult = await runReflectorStage(pi, runtime, ctx, resolver, hooks);
 		if (reflectorResult.outcome === "abort") return;
 	} catch (error) {
 		if (wasAborted(runtime)) return;
@@ -581,6 +589,7 @@ async function runReflectorStage(
 	runtime: Runtime,
 	ctx: ConsolidationCtx,
 	resolver: ModelResolver,
+	hooks: ConsolidationTriggerHooks,
 ): Promise<ReflectorStageResult> {
 	const entries = ctx.sessionManager.getBranch() as Entry[];
 	const reflectionTokens = stageTokens(entries, OM_REFLECTIONS_RECORDED, realContextTokens(ctx), observedTokensSinceReflectionCoverage);
@@ -601,13 +610,23 @@ async function runReflectorStage(
 	}
 
 	const folded = foldLedger(entries);
-	const reflections = await runStageWithFallback(ctx, "reflector", resolved, resolver, (worker) => {
+	const selected = await runStageWithFallback(ctx, "reflector", resolved, resolver, async (worker) => {
+		const signal = consolidationSignal(runtime);
+		let pass: ReflectorPass | undefined;
+		try {
+			if (hooks.prepareReflector) pass = await hooks.prepareReflector(ctx, signal);
+		} catch (error) {
+			const errorMessage = error instanceof Error ? error.message : String(error);
+			debugLog("reflector.addon_prepare_error", { errorMessage });
+			if (ctx.hasUI) ctx.ui?.notify(`Observational memory: reflector addon preparation failed: ${errorMessage}`, "warning");
+		}
+		if (signal?.aborted) return { reflections: undefined, pass };
 		const reflectorMemory = boundWorkerMemory(
 			folded.reflections,
 			folded.activeObservations,
 			resolveWorkerMemoryMaxTokens(runtime.config, (worker.model as { contextWindow?: number }).contextWindow),
 		);
-		return runReflector({
+		const reflections = await runReflector({
 			model: worker.model as any,
 			apiKey: worker.apiKey,
 			headers: worker.headers,
@@ -619,12 +638,24 @@ async function runReflectorStage(
 			signal: consolidationSignal(runtime),
 			thinkingLevel: workerThinkingLevel(runtime, worker),
 			modelRegistry: ctx.modelRegistry,
+			...(pass ? { addon: pass.addon } : {}),
 		});
+		return { reflections, pass };
 	}, consolidationSignal(runtime));
 	if (wasAborted(runtime)) {
 		debugLog("reflector.aborted", {});
 		return { outcome: "abort", sameRunReflections: [] };
 	}
+	// Release only the selected attempt, outside the model retry boundary and even for export-only runs.
+	try {
+		if (selected.pass) await selected.pass.flush();
+	} catch (error) {
+		const errorMessage = error instanceof Error ? error.message : String(error);
+		debugLog("reflector.addon_flush_error", { errorMessage });
+		if (ctx.hasUI) ctx.ui?.notify(`Observational memory: reflector addon release failed: ${errorMessage}`, "warning");
+	}
+	if (wasAborted(runtime)) return { outcome: "abort", sameRunReflections: [] };
+	const { reflections } = selected;
 	if (!reflections) return { outcome: "continue", sameRunReflections: [] };
 
 	const data = buildReflectionsRecordedData(reflections, observationCoverageId);

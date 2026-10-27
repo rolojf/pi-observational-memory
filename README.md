@@ -197,6 +197,12 @@ Pi loads the extension from the prebuilt `dist/index.ts` module that the package
 
 ---
 
+## Durable project memory (optional, fork-only)
+
+This fork can reuse reflector runs to write selected decisions to `ADR.jsonl` and reusable lessons to `MEMORIES/*.frontmatter.md`. Capture is automatic when enabled, without a review queue or another extraction worker. Relevant decision history is surfaced on file reads and through the `memory_lookup` tool; retrieval is advisory, not an edit gate.
+
+The feature is disabled by default and is not included in the upstream npm package. See [durable project memory](docs/durable-memory.md) for enablement, formats, retrieval, and limitations.
+
 ## Quick configuration
 
 Settings live under the `observational-memory` namespace in either:
@@ -469,6 +475,7 @@ V3 equivalent:
 * [`docs/concepts.md`](docs/concepts.md) — vocabulary and V3 mental model.
 * [`docs/how-it-works.md`](docs/how-it-works.md) — lifecycle, memory shapes, projections, and recall flow.
 * [`docs/configuration.md`](docs/configuration.md) — all V3 settings and migration notes.
+* [`docs/durable-memory.md`](docs/durable-memory.md) — optional JSONL decisions, Markdown lessons, and advisory retrieval in this fork.
 
 ---
 

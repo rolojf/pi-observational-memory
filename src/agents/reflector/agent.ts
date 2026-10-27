@@ -28,6 +28,12 @@ export class ReflectorStreamError extends Error {
 	}
 }
 
+export type ReflectorAddon = {
+	systemPrompt: string;
+	tools: AgentTool<any>[];
+	complete(): void;
+};
+
 interface RunReflectorArgs {
 	model: Model<any>;
 	apiKey?: string;
@@ -43,6 +49,7 @@ interface RunReflectorArgs {
 	thinkingLevel?: ModelThinkingLevel;
 	modelRegistry?: StreamableModelRegistry;
 	streamSimple?: WorkerStreamSimple;
+	addon?: ReflectorAddon;
 }
 
 const RecordReflectionsSchema = Type.Object({
@@ -182,8 +189,8 @@ export async function runReflector(args: RunReflectorArgs): Promise<Reflection[]
 	const userText = `CURRENT REFLECTIONS:\n${joinOrEmpty(reflections.map(reflectionToSummaryLine))}\n\nCURRENT OBSERVATIONS:\n${joinOrEmpty(observations.map((observation) => observationToReflectorLine(observation, coverageTierForObservation(observation, coverageById))))}\n\nCrystallize any missing durable facts or patterns into new reflections. If nothing is stable enough, do not call the tool.`;
 	const prompts: Message[] = [{ role: "user", content: [{ type: "text", text: userText }], timestamp: Date.now() }];
 	const context: AgentContext = {
-		messages: [{ role: "system", content: REFLECTOR_SYSTEM, timestamp: Date.now() }],
-		tools: [recordReflections as AgentTool<any>],
+		messages: [{ role: "system", content: args.addon ? `${REFLECTOR_SYSTEM}\n\n${args.addon.systemPrompt}` : REFLECTOR_SYSTEM, timestamp: Date.now() }],
+		tools: [recordReflections as AgentTool<any>, ...(args.addon?.tools ?? [])],
 	};
 	const reasoning = (model as { reasoning?: unknown }).reasoning;
 	const thinkingLevel = args.thinkingLevel ?? "low";
@@ -226,6 +233,14 @@ export async function runReflector(args: RunReflectorArgs): Promise<Reflection[]
 		}
 	}
 	await stream.result();
+	// Partial session reflections remain valid, but only a clean attempt can release addon outputs.
+	if (!streamError && !signal?.aborted && args.addon) {
+		try {
+			args.addon.complete();
+		} catch (error) {
+			debugLog("reflector.addon_complete_error", { errorMessage: error instanceof Error ? error.message : String(error) });
+		}
+	}
 	const acceptedReflections = Array.from(accumulated.values());
 	if (acceptedReflections.length === 0 && streamError) throw new ReflectorStreamError(streamError.stopReason, streamError.errorMessage);
 	const afterCoverageById = reflectionCoverageMap(observations, [...reflections, ...acceptedReflections]);
