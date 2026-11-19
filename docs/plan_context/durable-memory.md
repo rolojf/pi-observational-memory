@@ -21,9 +21,9 @@ Upstream seams identified before implementation:
 
 These are implementation proposals, not additional user requirements:
 
-- One opt-in durable-memory feature, disabled by default so existing installations remain unchanged. Once enabled, capture is automatic on each actual reflector run; no approval is requested for each record.
-- Use the current Git worktree root as the project root, or an explicitly configured root outside Git. Root discovery asks Git with a bounded timeout rather than treating any `.git` directory as a valid worktree. An explicit root must contain the session cwd and stay inside its Git worktree when one exists.
-- Configuration lives in a separate `durable-memory` settings namespace, using Pi's agent-directory settings and `.pi/settings.json` under the session cwd. Project values override global ones; malformed configuration disables the feature with a diagnostic. The settings are `enabled`, optional `projectRoot`, and optional read-only `sharedMemoryRoot`.
+- Durable memory defaults to on in any session directory. Capture is automatic on each actual reflector run; no approval is requested for each record.
+- By default, use the Git worktree root when available and otherwise the session cwd. Root discovery asks Git with a bounded timeout rather than treating any `.git` directory as a valid worktree. An explicit root must contain the session cwd and stay inside its Git worktree when one exists.
+- Opt out only in the session cwd's `.pi/settings.json` with `"durable-memory": false` or the existing object form with `enabled: false`. Agent-directory settings supply defaults for the optional `projectRoot` and read-only `sharedMemoryRoot` paths, which local settings can override. Malformed configuration still prevents capture with a diagnostic.
 - Write project decisions to `ADR.jsonl` and technical lessons to `MEMORIES/`. Use existing shared-memory metadata for retrieval only when configured/in scope; automatic writes or promotion into `$HOME/MEMORIES/` are deferred. Do not inspect other projects to prove generality during reflection.
 - Match literal repository-relative file paths initially. Globs, symbols, and rename tracking are deferred.
 - Keep capture cadence, passive mode, idle-mode behavior, worker limits, and model selection unchanged. A short session that never reaches a reflector run will not automatically export its decisions; a forced shutdown flush is not part of this version.

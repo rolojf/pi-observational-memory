@@ -29,21 +29,30 @@ afterEach(() => {
 });
 
 describe("durable memory configuration", () => {
-	it("is disabled without opt-in and does not require a Git root", () => {
+	it("uses the session directory by default outside Git without any settings", () => {
+		expect(loadMemoryConfig(project, agentDir)).toEqual({ mode: "project", projectRoot: project });
+	});
+
+	it("honors a local boolean opt-out inside Git", () => {
+		execFileSync("git", ["init", "--quiet", project]);
+		settings(join(project, ".pi", "settings.json"), false);
 		expect(loadMemoryConfig(project, agentDir)).toEqual({ mode: "off" });
 	});
 
-	it("lets project settings override global enablement", () => {
-		settings(join(agentDir, "settings.json"), { enabled: true });
+	it("keeps the existing local enabled:false syntax", () => {
 		settings(join(project, ".pi", "settings.json"), { enabled: false });
 		expect(loadMemoryConfig(project, agentDir)).toEqual({ mode: "off" });
 	});
 
-	it("uses the nearest Git worktree root from a nested session directory", () => {
+	it.each([false, { enabled: false }])("does not allow global settings to opt out (%j)", (value) => {
+		settings(join(agentDir, "settings.json"), value);
+		expect(loadMemoryConfig(project, agentDir)).toEqual({ mode: "project", projectRoot: project });
+	});
+
+	it("defaults to the Git worktree root from a nested session directory without settings", () => {
 		execFileSync("git", ["init", "--quiet", project]);
 		const nested = join(project, "src", "deep");
 		mkdirSync(nested, { recursive: true });
-		settings(join(agentDir, "settings.json"), { enabled: true });
 		expect(loadMemoryConfig(nested, agentDir)).toEqual({ mode: "project", projectRoot: project });
 	});
 
@@ -56,15 +65,19 @@ describe("durable memory configuration", () => {
 
 	it("does not mistake a stray .git directory for a worktree", () => {
 		mkdirSync(join(project, ".git"));
-		settings(join(project, ".pi", "settings.json"), { enabled: true });
-		expect(loadMemoryConfig(project, agentDir)).toMatchObject({ mode: "off", problem: expect.stringContaining("explicit projectRoot") });
+		const nested = join(project, "src");
+		mkdirSync(nested);
+		expect(loadMemoryConfig(nested, agentDir)).toEqual({ mode: "project", projectRoot: nested });
 	});
 
-	it("requires an explicit project root outside Git", () => {
-		settings(join(project, ".pi", "settings.json"), { enabled: true });
-		expect(loadMemoryConfig(project, agentDir)).toMatchObject({ mode: "off", problem: expect.stringContaining("explicit projectRoot") });
-		settings(join(project, ".pi", "settings.json"), { enabled: true, projectRoot: "." });
+	it("allows a local boolean true outside Git without specifying projectRoot", () => {
+		settings(join(project, ".pi", "settings.json"), true);
 		expect(loadMemoryConfig(project, agentDir)).toEqual({ mode: "project", projectRoot: project });
+	});
+
+	it("uses an explicit project root outside Git without an enabled setting", () => {
+		settings(join(project, ".pi", "settings.json"), { projectRoot: ".." });
+		expect(loadMemoryConfig(project, agentDir)).toEqual({ mode: "project", projectRoot: root });
 	});
 
 	it("rejects an unrelated configured root", () => {
@@ -85,8 +98,7 @@ describe("durable memory configuration", () => {
 		expect(loadMemoryConfig(project, agentDir)).toEqual({ mode: "project", projectRoot: project });
 	});
 
-	it("disables invalid project settings rather than inheriting global opt-in", () => {
-		settings(join(agentDir, "settings.json"), { enabled: true });
+	it("reports invalid project settings instead of starting capture", () => {
 		settings(join(project, ".pi", "settings.json"), { enabled: "true" });
 		expect(loadMemoryConfig(project, agentDir)).toMatchObject({ mode: "off", problem: expect.stringContaining("boolean") });
 		writeFileSync(join(project, ".pi", "settings.json"), "{broken");

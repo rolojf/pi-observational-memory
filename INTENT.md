@@ -8,6 +8,7 @@ Extend observational memory so useful decisions and lessons survive beyond one P
 
 - The observer and reflector remain trusted, best-effort selectors. Each actual reflector run may produce normal session reflections, architectural decisions, durable lessons, or any combination.
 - Automatically append selected decisions to `<project>/ADR.jsonl` and write selected lessons as Markdown memory files. No per-record review queue, required evidence, source-verification pass, or additional extraction model is wanted.
+- Durable memory is on by default with or without Git. Without Git, use Pi's session working directory by default. The opt-out belongs in that directory's `.pi/settings.json`.
 - Keep attribution as the reflector judges it. Preserve human-attributed decisions by default; surface relevant history when working on its files, and ask whether to keep or review a decision only when the requested change conflicts with it.
 - Capture cheaply. Do not scan prior decisions during reflection to merge records, update statuses, or infer supersession. Later maintenance may organize the history.
 - Use ordinary JSON serialization, not TSV or a custom encoding tool. Keep the decision and rationale, not merely a list of touched files.

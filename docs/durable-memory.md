@@ -1,33 +1,22 @@
 # Durable project memory
 
-This fork adds optional project-level decision history and reusable lessons to the existing reflector. It is off by default. The upstream npm package does not contain this fork-only feature; load/install this fork's built extension to use it.
+This fork adds project-level decision history and reusable lessons to the existing reflector. It is enabled by default in any session directory, with or without Git. The upstream npm package does not contain this fork-only feature; load/install this fork's built extension to use it.
 
-## Enable it
+## Configuration
 
-Add this separate section to the session working directory's `.pi/settings.json`, preserving other settings:
+No settings are needed. In Git, files go in the worktree root, even if you start Pi in a subdirectory. Outside Git, they go in the directory where you started Pi.
 
-```json
-{
-  "durable-memory": {
-    "enabled": true
-  }
-}
-```
-
-Reload Pi after changing settings. Agent-directory `settings.json` also supports the section; project settings override it. Prefer project-level opt-in unless you intentionally want capture across your projects.
-
-The output root defaults to the current Git worktree root, including when the session starts in a subdirectory. Outside Git, set `projectRoot` explicitly:
+To turn it off, add this to `.pi/settings.json` in the session working directory, preserving other settings:
 
 ```json
 {
-  "durable-memory": {
-    "enabled": true,
-    "projectRoot": "."
-  }
+  "durable-memory": false
 }
 ```
 
-Paths resolve relative to the session cwd and support `~/`. An explicit root must contain the cwd and cannot escape its current Git worktree. Invalid settings disable durable memory with a warning; they do not disable ordinary session memory. No directories or artifacts are created merely by enabling the feature.
+The older local form `"durable-memory": { "enabled": false }` still works. An opt-out in agent-directory settings no longer turns the feature off. Reload Pi after changing settings.
+
+To change the output directory, set `"durable-memory": { "projectRoot": "…" }`. Path options in the session's `.pi/settings.json` override agent-directory defaults. Paths resolve relative to the session directory and support `~/`. An explicit root must contain the session directory and cannot escape its Git worktree. Invalid settings suspend durable memory with a warning; they do not affect ordinary session memory. Files are created only when the reflector selects something to save.
 
 ## What gets written
 
@@ -89,7 +78,6 @@ Optional shared lessons can be read by configuring a root:
 ```json
 {
   "durable-memory": {
-    "enabled": true,
     "sharedMemoryRoot": "~/MEMORIES"
   }
 }

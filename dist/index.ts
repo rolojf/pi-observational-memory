@@ -1579,6 +1579,7 @@ function readSettings(path) {
   if (!isRecord4(parsed)) throw new Error(`Invalid settings object: ${path}`);
   const value = parsed[SETTINGS_KEY2];
   if (value === void 0) return {};
+  if (typeof value === "boolean") return { enabled: value };
   if (!isRecord4(value)) throw new Error(`Invalid ${SETTINGS_KEY2} settings: ${path}`);
   const settings = {};
   if (value.enabled !== void 0) {
@@ -1618,24 +1619,22 @@ function findGitRoot(cwd) {
 }
 function loadMemoryConfig(cwd, agentDir = getAgentDir2()) {
   try {
-    const settings = {
+    const local = readSettings(join3(cwd, ".pi", "settings.json"));
+    if (local.enabled === false) return { mode: "off" };
+    const { projectRoot: configuredRoot, sharedMemoryRoot } = {
       ...readSettings(join3(agentDir, "settings.json")),
-      ...readSettings(join3(cwd, ".pi", "settings.json"))
+      ...local
     };
-    if (settings.enabled !== true) return { mode: "off" };
     const current = realpathSync(cwd);
     const gitRoot = findGitRoot(current);
-    const projectRoot = settings.projectRoot ? realpathSync(expandPath(settings.projectRoot, current)) : gitRoot;
-    if (!projectRoot) {
-      return { mode: "off", problem: "Durable memory requires a Git worktree or an explicit projectRoot." };
-    }
+    const projectRoot = configuredRoot ? realpathSync(expandPath(configuredRoot, current)) : gitRoot ?? current;
     if (!statSync(projectRoot).isDirectory() || !containsPath(projectRoot, current)) {
       return { mode: "off", problem: "Durable memory projectRoot must be a directory containing the session cwd." };
     }
     if (gitRoot && !containsPath(gitRoot, projectRoot)) {
       return { mode: "off", problem: "Durable memory projectRoot must stay inside the current Git worktree." };
     }
-    const sharedRoot = settings.sharedMemoryRoot ? expandPath(settings.sharedMemoryRoot, current) : void 0;
+    const sharedRoot = sharedMemoryRoot ? expandPath(sharedMemoryRoot, current) : void 0;
     return { mode: "project", projectRoot, ...sharedRoot ? { sharedRoot } : {} };
   } catch (error) {
     return { mode: "off", problem: `Durable memory configuration: ${error instanceof Error ? error.message : String(error)}` };

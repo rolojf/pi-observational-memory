@@ -28,6 +28,7 @@ function readSettings(path: string): Settings {
 	if (!isRecord(parsed)) throw new Error(`Invalid settings object: ${path}`);
 	const value = parsed[SETTINGS_KEY];
 	if (value === undefined) return {};
+	if (typeof value === "boolean") return { enabled: value };
 	if (!isRecord(value)) throw new Error(`Invalid ${SETTINGS_KEY} settings: ${path}`);
 
 	const settings: Settings = {};
@@ -71,24 +72,22 @@ function findGitRoot(cwd: string): string | undefined {
 	}
 }
 
-/** Resolve an explicit project scope without changing the upstream settings loader. */
+/** Resolve the durable project scope without changing the upstream settings loader. */
 export function loadMemoryConfig(cwd: string, agentDir = getAgentDir()): MemoryConfig {
 	try {
-		// Follow Pi's settings locations: project settings belong to the session cwd.
-		const settings = {
+		// Only the session directory's settings can opt out; global settings supply path defaults.
+		const local = readSettings(join(cwd, ".pi", "settings.json"));
+		if (local.enabled === false) return { mode: "off" };
+		const { projectRoot: configuredRoot, sharedMemoryRoot } = {
 			...readSettings(join(agentDir, "settings.json")),
-			...readSettings(join(cwd, ".pi", "settings.json")),
+			...local,
 		};
-		if (settings.enabled !== true) return { mode: "off" };
 
 		const current = realpathSync(cwd);
 		const gitRoot = findGitRoot(current);
-		const projectRoot = settings.projectRoot
-			? realpathSync(expandPath(settings.projectRoot, current))
-			: gitRoot;
-		if (!projectRoot) {
-			return { mode: "off", problem: "Durable memory requires a Git worktree or an explicit projectRoot." };
-		}
+		const projectRoot = configuredRoot
+			? realpathSync(expandPath(configuredRoot, current))
+			: gitRoot ?? current;
 		if (!statSync(projectRoot).isDirectory() || !containsPath(projectRoot, current)) {
 			return { mode: "off", problem: "Durable memory projectRoot must be a directory containing the session cwd." };
 		}
@@ -96,9 +95,7 @@ export function loadMemoryConfig(cwd: string, agentDir = getAgentDir()): MemoryC
 			return { mode: "off", problem: "Durable memory projectRoot must stay inside the current Git worktree." };
 		}
 
-		const sharedRoot = settings.sharedMemoryRoot
-			? expandPath(settings.sharedMemoryRoot, current)
-			: undefined;
+		const sharedRoot = sharedMemoryRoot ? expandPath(sharedMemoryRoot, current) : undefined;
 		return { mode: "project", projectRoot, ...(sharedRoot ? { sharedRoot } : {}) };
 	} catch (error) {
 		return { mode: "off", problem: `Durable memory configuration: ${error instanceof Error ? error.message : String(error)}` };

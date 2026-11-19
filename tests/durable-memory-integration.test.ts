@@ -40,7 +40,7 @@ const MODEL: Model<"openai-completions"> = {
 	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 };
 
-type Mode = "enabled" | "disabled";
+type Mode = "default" | "disabled";
 type Handler = (event: unknown, ctx: ExtensionContext) => unknown;
 let sandbox: string;
 let root: string;
@@ -54,6 +54,7 @@ beforeEach(async () => {
 	await mkdir(agentDir);
 	await writeFile(join(agentDir, "settings.json"), "{}");
 	await writeFile(join(root, TARGET_PATH), "export const advisory = true;\n");
+	vi.stubEnv("GIT_CEILING_DIRECTORIES", sandbox);
 	vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
 	vi.stubEnv("PI_OBSERVATIONAL_MEMORY_PASSIVE", "false");
 	expect(getAgentDir()).toBe(agentDir);
@@ -67,7 +68,7 @@ afterEach(async () => {
 
 async function fixture(mode: Mode) {
 	await writeFile(join(root, ".pi", "settings.json"), JSON.stringify({
-		"durable-memory": { enabled: mode === "enabled", projectRoot: root },
+		...(mode === "disabled" ? { "durable-memory": false } : {}),
 		"observational-memory": { reflectAfterTokens: 1, showWorkerNotifications: false },
 	}));
 
@@ -89,7 +90,7 @@ async function fixture(mode: Mode) {
 		type: "toolCall", id: "reflection-call", name: "record_reflections",
 		arguments: { reflections: [{ content: REFLECTION, supportingObservationIds: [OBSERVATION_ID] }] },
 	}];
-	if (mode === "enabled") calls.push(
+	if (mode === "default") calls.push(
 		{ type: "toolCall", id: "decision-call", name: "record_decisions", arguments: { decisions: [DECISION] } },
 		{ type: "toolCall", id: "lesson-call", name: "record_lessons", arguments: { lessons: [LESSON] } },
 	);
@@ -175,8 +176,8 @@ function checkReflection(f: Awaited<ReturnType<typeof fixture>>) {
 }
 
 describe("registered durable memory integration", () => {
-	it("persists and retrieves decisions and lessons from the same pass as session reflections", async () => {
-		const f = await fixture("enabled");
+	it("persists and retrieves decisions and lessons by default outside Git", async () => {
+		const f = await fixture("default");
 		checkReflection(f);
 		expect(getCurrentTools(f.requests[0].messages).map((tool) => tool.name)).toEqual([
 			"record_reflections", "record_decisions", "record_lessons",

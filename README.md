@@ -197,11 +197,11 @@ Pi loads the extension from the prebuilt `dist/index.ts` module that the package
 
 ---
 
-## Durable project memory (optional, fork-only)
+## Durable project memory (fork-only)
 
 This fork can reuse reflector runs to write selected decisions to `ADR.jsonl` and reusable lessons to `MEMORIES/*.frontmatter.md`. Capture is automatic when enabled, without a review queue or another extraction worker. Relevant decision history is surfaced on file reads and through the `memory_lookup` tool; retrieval is advisory, not an edit gate.
 
-The feature is disabled by default and is not included in the upstream npm package. See [durable project memory](docs/durable-memory.md) for enablement, formats, retrieval, and limitations.
+The feature is enabled by default with or without Git. To turn it off, set `"durable-memory": false` in the session directory's `.pi/settings.json`. This feature is not included in the upstream npm package. See [durable project memory](docs/durable-memory.md) for configuration, formats, retrieval, and limitations.
 
 ## Quick configuration
 
